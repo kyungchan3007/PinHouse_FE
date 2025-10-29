@@ -9,7 +9,6 @@ export default function OnboardingPage() {
   const content = onboardingContentMap[type as keyof typeof onboardingContentMap];
 
   if (!content) return <div>잘못된 접근입니다.</div>;
-
   const { Icon, title, description } = content;
 
   return (
