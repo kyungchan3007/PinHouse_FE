@@ -5,7 +5,8 @@ on:
     workflows: ["Build and Push to Docker Hub"]
     types:
       - completed
-
+  workflow_dispatch:
+  
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -32,4 +33,4 @@ jobs:
               --name pinhouse \
               --restart unless-stopped \
               -p 3000:3000 \
-              ${{ secrets.DOCKE
+              ${{ secrets.DOCKER_USERNAME }}/pinhouse:latest
