@@ -31,7 +31,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./apps/frontend/Dockerfile
+          file: ./Docker-pinhouse-file
           push: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/pinhouse:latest
