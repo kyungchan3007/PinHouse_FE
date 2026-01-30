@@ -6,11 +6,15 @@ on:
     types:
       - completed
   workflow_dispatch:
-  
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        github.event.workflow_run.conclusion == 'success'
+      }}
 
     steps:
       - name: Deploy to EC2 via SSH
@@ -22,13 +26,8 @@ jobs:
           script: |
             set -e
 
-            echo "🔹 Pull latest image"
             docker pull ${{ secrets.DOCKER_USERNAME }}/pinhouse:latest
-
-            echo "🔹 Stop & remove existing container"
             docker rm -f pinhouse || true
-
-            echo "🔹 Run new container"
             docker run -d \
               --name pinhouse \
               --restart unless-stopped \
