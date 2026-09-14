@@ -91,72 +91,72 @@
 
 ```mermaid
 flowchart LR
-    User["👤 사용자<br/>(Browser)"]
+    U["👤 사용자<br/>(브라우저)"]
 
-    subgraph FE["PinHouse FE · Next.js 15"]
+    subgraph FE["PinHouse FE · Next.js"]
         direction TB
-        MW["middleware.ts<br/>인증 라우트 가드"]
-        RSC["Server Components<br/>SSR · Prefetch · Hydration"]
-        CC["Client Components<br/>TanStack Query · Zustand"]
-        BFF["Route Handlers<br/>app/api/* (BFF)"]
-        CACHE[("BFF Route Cache<br/>TTL · in-flight dedupe")]
+        PAGE["🖥️ 페이지 서버<br/>화면을 미리 그려서 전달 (SSR)"]
+        BFF["🔀 API 중계 서버 (BFF)<br/>인증 전달 · 캐시"]
     end
 
-    subgraph EXT["External"]
-        API["PinHouse Backend API<br/>(/v1, /v2)"]
-        OAUTH["Kakao / Naver<br/>OAuth2"]
-        GPT["OpenAI API"]
-        CDN["Kakao CDN<br/>(프로필 이미지)"]
+    subgraph EXT["외부 서비스"]
+        direction TB
+        API["🗄️ PinHouse 백엔드 API"]
+        GPT["🤖 OpenAI"]
     end
 
-    User -->|HTTPS| MW --> RSC
-    RSC -->|HTML + dehydrated state| User
-    User --> CC
-    CC -->|"/api/* (홈·공고·검색·채팅)"| BFF
-    CC -->|"axios (마이페이지·온보딩·자격진단 등)"| API
-    RSC -->|callServer / 자체 BFF 호출| API
-    BFF <--> CACHE
-    BFF -->|cookie / Bearer 전달| API
-    BFF --> GPT
-    User -->|로그인| OAUTH -->|code| BFF
-    CC -. 이미지 .-> CDN
+    U -->|① 페이지 요청| PAGE
+    PAGE -->|② 초기 데이터 조회| API
+    U -->|③ 화면 조작 중 데이터 요청| BFF
+    BFF -->|④ 데이터 조회| API
+    BFF -->|AI 상담| GPT
 ```
+
+| 구성 요소 | 하는 일 |
+| --- | --- |
+| **페이지 서버** | 첫 진입 시 서버에서 데이터를 받아 완성된 화면을 내려줍니다. 로딩 없이 바로 내용이 보입니다. |
+| **API 중계 서버 (BFF)** | 브라우저 대신 백엔드를 호출합니다. 로그인 쿠키를 전달하고, 같은 요청은 캐시로 응답합니다. |
+| **백엔드 API** | 공고, 핀포인트, 자격 진단, 회원 정보 등 실제 데이터를 제공합니다. |
+| **OpenAI** | AI 상담 챗봇 응답을 생성합니다. (API 키는 서버에서만 사용) |
+
+> 소셜 로그인(카카오·네이버) 흐름은 [동작 프로세스 › 소셜 로그인](#3-소셜-로그인)에서, 마이페이지·온보딩 등 일부 기능의 백엔드 직접 호출은 [상태 책임 분리](#상태-책임-분리)에서 설명합니다.
 
 ---
 
 ## 🧱 아키텍처 다이어그램
 
-### 요청 경계: Browser ↔ BFF ↔ Origin
+### 데이터 요청 흐름
+
+사용자가 필터를 바꿔 공고를 다시 조회할 때, 데이터는 아래 순서로 오갑니다.
 
 ```mermaid
-flowchart TB
-    subgraph Browser
-        UI["UI Component"]
-        Z["Zustand<br/>draft / applied · UI 상태"]
-        Q["TanStack Query<br/>서버 데이터 캐시"]
-        URL["URL Search Params<br/>공유 가능한 조건"]
+flowchart LR
+    subgraph B["브라우저"]
+        direction TB
+        STORE["📝 Zustand<br/>입력 중인 필터"]
+        QUERY["📦 React Query<br/>받아온 데이터 보관"]
     end
 
-    subgraph NextServer["Next.js Server"]
-        Page["page.tsx (RSC)"]
-        Widget["widgets/*Page<br/>getInitialData → prefetch"]
-        Route["app/api/* Route Handler"]
-        subgraph FeatureServer["features/*/server"]
-            Bff["bff/<br/>캐시 키 · 스코프 · TTL"]
-            Call["callServer/<br/>Origin fetch · 인증 헤더"]
-        end
+    subgraph S["Next.js 서버"]
+        direction TB
+        BFF["🔀 BFF<br/>app/api/*"]
+        CACHE[("⚡ 캐시")]
     end
 
-    Origin[("Backend API")]
+    API[("🗄️ 백엔드 API")]
 
-    UI --> Z
-    Z -->|applied 조건만| Q
-    URL --> Page
-    Page --> Widget --> Call
-    Q -->|fetch /api/*| Route --> Bff --> Call --> Origin
-    Q -.->|"axios http (토큰 재발급 인터셉터)"| Origin
-    Widget -->|dehydrate| Q
+    STORE -->|① 적용 버튼| QUERY
+    QUERY -->|② 데이터 요청| BFF
+    BFF -->|③ 저장된 결과 확인| CACHE
+    BFF -->|④ 없으면 조회| API
 ```
+
+1. **필터 입력**: 입력 중인 값은 Zustand에만 두고, 적용 버튼을 눌러야 조회 조건으로 확정됩니다. 입력할 때마다 요청이 나가지 않습니다.
+2. **데이터 요청**: React Query가 확정된 조건으로 `/api/*`에 요청합니다. 5분 안에 받아온 조건이면 요청 없이 보관된 데이터를 보여줍니다.
+3. **캐시 확인**: BFF가 같은 조건의 결과를 5분 동안 저장해 두고, 있으면 바로 응답합니다. (공고 리스트·검색에 적용)
+4. **백엔드 조회**: 캐시에 없을 때만 로그인 쿠키를 붙여 백엔드를 호출합니다.
+
+> 페이지에 처음 들어올 때는 서버가 데이터를 미리 채워서 보내므로 ②~④ 요청이 생기지 않습니다. ([동작 프로세스 › 페이지 진입](#1-페이지-진입--ssr-prefetch--hydration))
 
 ### 상태 책임 분리
 
