@@ -90,26 +90,19 @@
 ## 🌐 전체 시스템 구조
 
 ```mermaid
-flowchart LR
-    U["👤 사용자<br/>(브라우저)"]
+%%{init: {'themeVariables': {'fontSize': '18px'}}}%%
+flowchart TB
+    U["👤 사용자 (브라우저)"]
+    PAGE["🖥️ 페이지 서버 (SSR)"]
+    BFF["🔀 API 중계 서버 (BFF)"]
+    API[("🗄️ 백엔드 API")]
+    GPT["🤖 OpenAI"]
 
-    subgraph FE["PinHouse FE · Next.js"]
-        direction TB
-        PAGE["🖥️ 페이지 서버<br/>화면을 미리 그려서 전달 (SSR)"]
-        BFF["🔀 API 중계 서버 (BFF)<br/>인증 전달 · 캐시"]
-    end
-
-    subgraph EXT["외부 서비스"]
-        direction TB
-        API["🗄️ PinHouse 백엔드 API"]
-        GPT["🤖 OpenAI"]
-    end
-
-    U -->|① 페이지 요청| PAGE
-    PAGE -->|② 초기 데이터 조회| API
-    U -->|③ 화면 조작 중 데이터 요청| BFF
-    BFF -->|④ 데이터 조회| API
-    BFF -->|AI 상담| GPT
+    U -->|"① 페이지 요청"| PAGE
+    U -->|"② 데이터 요청"| BFF
+    PAGE -->|"초기 데이터"| API
+    BFF -->|"데이터 조회"| API
+    BFF -->|"AI 상담"| GPT
 ```
 
 | 구성 요소 | 하는 일 |
@@ -130,25 +123,20 @@ flowchart LR
 사용자가 필터를 바꿔 공고를 다시 조회할 때, 데이터는 아래 순서로 오갑니다.
 
 ```mermaid
-flowchart LR
-    subgraph B["브라우저"]
-        direction TB
-        STORE["📝 Zustand<br/>입력 중인 필터"]
-        QUERY["📦 React Query<br/>받아온 데이터 보관"]
-    end
+%%{init: {'themeVariables': {'fontSize': '18px'}}}%%
+flowchart TB
+    A["📝 필터 입력 (Zustand)"]
+    B["📦 React Query"]
+    C["🔀 BFF (app/api)"]
+    D{"캐시에 있나?"}
+    E["⚡ 바로 응답"]
+    F[("🗄️ 백엔드 API")]
 
-    subgraph S["Next.js 서버"]
-        direction TB
-        BFF["🔀 BFF<br/>app/api/*"]
-        CACHE[("⚡ 캐시")]
-    end
-
-    API[("🗄️ 백엔드 API")]
-
-    STORE -->|① 적용 버튼| QUERY
-    QUERY -->|② 데이터 요청| BFF
-    BFF -->|③ 저장된 결과 확인| CACHE
-    BFF -->|④ 없으면 조회| API
+    A -->|"① 적용 버튼"| B
+    B -->|"② 데이터 요청"| C
+    C -->|"③ 캐시 확인"| D
+    D -->|"있음"| E
+    D -->|"④ 없음"| F
 ```
 
 1. **필터 입력**: 입력 중인 값은 Zustand에만 두고, 적용 버튼을 눌러야 조회 조건으로 확정됩니다. 입력할 때마다 요청이 나가지 않습니다.
@@ -175,12 +163,13 @@ flowchart LR
 Next.js **App Router(`app/`)** 를 라우팅 전용 레이어로 두고, 실제 구현은 **Feature-Sliced Design(`src/`)** 으로 분리했습니다.
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '18px'}}}%%
 flowchart TB
-    A["app/ · Routing<br/>page.tsx · layout.tsx · api/*"]
-    W["src/widgets<br/>페이지 단위 조합 · SSR 진입 · Hydration"]
-    F["src/features<br/>사용자 시나리오 · UI · hooks · model · server(bff/callServer)"]
-    E["src/entities<br/>도메인 모델 · API · 도메인 hooks"]
-    S["src/shared<br/>공용 UI · http · endpoints · hooks · lib · types"]
+    A["app · 라우팅 · BFF"]
+    W["widgets · 화면 조합 · SSR"]
+    F["features · 기능 구현"]
+    E["entities · 도메인 모델"]
+    S["shared · 공용 UI · 유틸"]
 
     A --> W --> F --> E --> S
 ```
@@ -215,91 +204,84 @@ features/listings/
 ### 1) 페이지 진입 — SSR Prefetch & Hydration
 
 ```mermaid
+%%{init: {'sequence': {'actorFontSize': 18, 'messageFontSize': 18, 'noteFontSize': 17, 'actorMargin': 60}}}%%
 sequenceDiagram
-    autonumber
-    actor U as User
-    participant MW as middleware
-    participant P as page.tsx (RSC)
-    participant W as widgets/*Page
-    participant CS as callServer
-    participant API as Backend API
-    participant C as Client (React Query)
+    actor U as 사용자
+    participant N as Next.js 서버
+    participant A as 백엔드 API
 
-    U->>MW: GET /listings?region=...
-    MW->>MW: access_token / is_auth 쿠키 확인
-    alt 미인증 & 보호 라우트
-        MW-->>U: 302 /login
-    end
-    MW->>P: next()
-    P->>P: searchParams → criteria 파싱·정규화
-    P->>W: initialFilter 전달
-    W->>CS: getInitialData(filter)
-    CS->>API: fetch (cookie, Bearer)
-    API-->>CS: 첫 페이지 데이터
-    W->>W: queryClient.prefetch(queryKey(criteria))
-    W-->>U: HTML + dehydrate(state)
-    U->>C: HydrationBoundary로 캐시 복원
-    Note over C: 같은 queryKey → 첫 렌더 추가 요청 없음
+    U->>N: 페이지 요청
+    N->>N: 로그인 확인
+    N->>A: 초기 데이터 조회
+    A-->>N: 데이터
+    N-->>U: 완성된 화면 + 데이터
+    Note over U: 추가 요청 없이 바로 표시
 ```
+
+- 서버에서 미리 받은 데이터를 React Query에 담아 보내므로(`HydrationBoundary`), 브라우저는 같은 데이터를 다시 요청하지 않습니다.
+- 로그인이 필요한 페이지에 비로그인 상태로 들어오면 `middleware.ts`가 `/login`으로 보냅니다.
 
 ### 2) 클라이언트 조회 — BFF 캐시
 
 ```mermaid
+%%{init: {'sequence': {'actorFontSize': 18, 'messageFontSize': 18, 'noteFontSize': 17, 'actorMargin': 60}}}%%
 sequenceDiagram
-    autonumber
-    participant C as Client (useQuery)
-    participant R as app/api/listings/search
-    participant B as bff/listingsRouteCache
-    participant CS as callServer
-    participant API as Backend API
+    participant B as 브라우저
+    participant F as BFF
+    participant C as 캐시
+    participant A as 백엔드 API
 
-    C->>R: GET /api/listings/search?q=...
-    R->>R: criteria 파싱 · 정규화
-    R->>B: resolveScope(cookie) → public | session:hash
-    R->>B: cacheKey = v1:listing-search:{scope}:{sha1(criteria)}
-    alt 캐시 HIT (TTL 5분 이내)
-        B-->>R: cached data
-    else in-flight 요청 존재
-        B-->>R: 진행 중 Promise 공유
-    else MISS
-        B->>CS: loader()
-        CS->>API: fetch
-        API-->>CS: data
-        CS-->>B: 성공 응답만 저장
+    B->>F: 공고 검색 요청
+    F->>C: 같은 조건 결과 확인
+    alt 있음
+        C-->>F: 저장된 결과
+    else 없음
+        F->>A: 백엔드 조회
+        A-->>F: 결과
+        F->>C: 5분간 저장
     end
-    R-->>C: 200 { data } + x-pinhouse-cache: HIT|MISS|BYPASS
+    F-->>B: 응답
 ```
+
+- 캐시는 로그인 사용자별로 분리되어, 다른 사람의 개인화 결과가 섞이지 않습니다.
+- 응답 헤더 `x-pinhouse-cache`로 `HIT` / `MISS`를 확인할 수 있습니다.
 
 ### 3) 소셜 로그인
 
 ```mermaid
+%%{init: {'sequence': {'actorFontSize': 18, 'messageFontSize': 18, 'noteFontSize': 17, 'actorMargin': 60}}}%%
 sequenceDiagram
-    autonumber
-    actor U as User
-    participant O as Kakao / Naver
-    participant CB as /api/auth/callback
-    participant API as Backend API
+    actor U as 사용자
+    participant O as 카카오·네이버
+    participant N as Next.js 서버
+    participant A as 백엔드 API
 
     U->>O: 소셜 로그인
-    O-->>CB: redirect ?code=
-    CB->>API: exchangeOAuthCode(code)
-    alt 신규 회원 (TOKEN_REQUIRED)
-        CB-->>U: 302 /signup?state=tempKey
+    O-->>N: 인증 코드
+    N->>A: 코드로 토큰 발급
+    A-->>N: 결과
+    alt 신규 회원
+        N-->>U: 회원가입 화면
     else 기존 회원
-        CB->>CB: access_token · refresh_token · pinpoint_id<br/>httpOnly 쿠키 설정
-        CB-->>U: 302 /home
+        N-->>U: 쿠키 저장 후 홈 이동
     end
-    Note over U,API: 이후 401 발생 시 axios 인터셉터가 refresh 1회 수행<br/>대기 요청은 큐에서 재시도 · 실패 시 로그아웃
 ```
+
+- 토큰은 `httpOnly` 쿠키로 저장해 브라우저 스크립트에서 읽을 수 없습니다.
+- 이후 토큰이 만료되면 자동으로 재발급하고, 실패하면 로그아웃합니다.
 
 ### 4) 자격 진단 → 추천
 
 ```mermaid
-flowchart LR
-    S1["기본 정보 입력"] --> S2["가구·소득·자산<br/>단계형 설문"] --> R["진단 결과"]
-    R --> F["최종 결과"]
-    R --> REC["진단 기반 추천 공고<br/>(무한 스크롤)"]
-    REC --> D["공고 상세 / 방 비교"]
+%%{init: {'themeVariables': {'fontSize': '18px'}}}%%
+flowchart TB
+    S1["📝 기본 정보 입력"]
+    S2["📋 단계별 설문"]
+    R["✅ 진단 결과"]
+    REC["🏠 추천 공고"]
+    D["🔍 공고 상세 · 방 비교"]
+
+    S1 --> S2 --> R --> REC --> D
 ```
 
 ---
@@ -375,29 +357,21 @@ PinHouse_FE
 
 ## 📈 개발 과정
 
-```mermaid
-timeline
-    title PinHouse FE 개발 타임라인
-    2025.09 : Next.js 15 + FSD 폴더 구조 세팅
-            : 이슈 / PR 템플릿 정의
-    2025.10 : 로그인 폼 · 온보딩 · 미들웨어
-            : Storybook 도입 · 소셜 로고
-    2025.11 : 공용 컴포넌트 (Input, SearchBar, Headless UI)
-            : 공고 검색 · 빠른 탐색
-    2025.12 : 무한 스크롤 · 방 타입 상세 API + Jest
-            : 자격 진단 기본 정보 폼
-    2026.01 : 공고 상세 필터 · 방 비교 · 스켈레톤
-            : 홈 핀포인트 API · 글로벌 검색 UI
-    2026.02 : 해상도별 반응형 · 진단 기반 추천 API
-            : 자격진단 공용 헤더
-    2026.03 : 홈 SSR / BFF 구조 전환
-            : 공고 리스트 · 방 비교 BFF prefetch · AI 챗봇 BFF
-    2026.04 : 채팅 SSR 연동 · 응답 구조화 · CTA
-            : 홈 bootstrap / 자격진단 BFF 통일
-    2026.05 : 공고 상세 · 홈 검색 BFF 전환
-    2026.06 : AI Agent 워크플로 도입 · SSR 라우팅 개선
-    2026.07 : BFF 캐시 정책 수립 · 사용자 스코프 분리 캐시 리팩터링
-```
+| 시기 | 주요 작업 |
+| --- | --- |
+| 2025.09 | Next.js 15 + FSD 폴더 구조 세팅, 이슈·PR 템플릿 |
+| 2025.10 | 로그인 폼, 온보딩, 미들웨어, Storybook 도입 |
+| 2025.11 | 공용 컴포넌트(Input, SearchBar), 공고 검색, 빠른 탐색 |
+| 2025.12 | 무한 스크롤, 방 타입 상세 API + Jest, 자격 진단 기본 정보 폼 |
+| 2026.01 | 공고 상세 필터, 방 비교, 스켈레톤, 홈 핀포인트, 글로벌 검색 UI |
+| 2026.02 | 해상도별 반응형, 진단 기반 추천 API |
+| 2026.03 | 홈 SSR·BFF 전환, 공고 리스트·방 비교 BFF, AI 챗봇 |
+| 2026.04 | 채팅 SSR 연동·응답 구조화, 홈·자격진단 BFF 통일 |
+| 2026.05 | 공고 상세·홈 검색 BFF 전환 |
+| 2026.06 | AI Agent 워크플로 도입, SSR 라우팅 개선 |
+| 2026.07 | BFF 캐시 정책 수립, 사용자별 캐시 분리 |
+
+#### 단계별 요약
 
 | 단계 | 주요 내용 |
 | --- | --- |
@@ -414,14 +388,28 @@ timeline
 `AGENTS.md` 와 `.agents/` 디렉터리에 AI 에이전트 운영 규칙을 정의해 **구현과 검증을 분리**합니다.
 
 ```mermaid
-flowchart LR
-    P["요청"] --> CL{"작업 유형 분류"}
-    CL -->|구현| I["implementer<br/>pinhouse-frontend 스킬<br/>+ query-cache-bff 지침"]
-    CL -->|검증| V["reviewer<br/>codex-review-workflow<br/>gate-matrix"]
-    CL -->|기록| L["worklog<br/>change-summary-report"]
+%%{init: {'themeVariables': {'fontSize': '18px'}}}%%
+flowchart TB
+    P["💬 요청"]
+    CL{"작업 유형"}
+    I["🛠️ 구현"]
+    V["🔎 검증"]
+    L["📝 기록"]
+    O["✅ PASS / HOLD 판정"]
+
+    P --> CL
+    CL --> I
+    CL --> V
+    CL --> L
     I --> V
-    V --> O["Verdict: MERGE PASS / HOLD<br/>Failed Gates · Score · Findings"]
+    V --> O
 ```
+
+| 단계 | 담당 역할 · 스킬 |
+| --- | --- |
+| 🛠️ 구현 | `implementer` · `pinhouse-frontend` 스킬 + Query·Cache·BFF 지침 |
+| 🔎 검증 | `reviewer` · `codex-review-workflow` 게이트 매트릭스 → Score · Findings |
+| 📝 기록 | `worklog` · `change-summary-report` |
 
 | 스킬 | 용도 |
 | --- | --- |
